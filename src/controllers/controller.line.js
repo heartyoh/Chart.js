@@ -6,6 +6,7 @@ module.exports = function(Chart) {
 
 	Chart.defaults.line = {
 		showLines: true,
+		spanGaps: false,
 
 		hover: {
 			mode: "label"
@@ -23,70 +24,43 @@ module.exports = function(Chart) {
 		}
 	};
 
+	function lineEnabled(dataset, options) {
+		return helpers.getValueOrDefault(dataset.showLine, options.showLines);
+	}
+
 	Chart.controllers.line = Chart.DatasetController.extend({
-		addElements: function() {
-			var me = this;
-			var meta = me.getMeta();
-			var data = me.getDataset().data || [];
-			var value, i, ilen;
 
-			meta.dataset = meta.dataset || new Chart.elements.Line({
-				_chart: me.chart.chart,
-				_datasetIndex: me.index,
-				_points: meta.data
-			});
+		datasetElementType: Chart.elements.Line,
 
-			for (i=0, ilen=data.length; i<ilen; ++i) {
-				value = data[i];
-				meta.data[i] = meta.data[i] || new Chart.elements.Point({
-					_chart: me.chart.chart,
-					_datasetIndex: me.index,
-					_index: i
-				});
-			}
-		},
+		dataElementType: Chart.elements.Point,
 
 		addElementAndReset: function(index) {
 			var me = this;
 			var options = me.chart.options;
-			var point = new Chart.elements.Point({
-				_chart: me.chart.chart,
-				_datasetIndex: me.index,
-				_index: index
-			});
+			var meta = me.getMeta();
 
-			// Add to the points array and reset it
-			me.getMeta().data.splice(index, 0, point);
-			me.updateElement(point, index, true);
+			Chart.DatasetController.prototype.addElementAndReset.call(me, index);
 
 			// Make sure bezier control points are updated
-			if (options.showLines && options.elements.line.tension !== 0) {
+			if (lineEnabled(me.getDataset(), options) && meta.dataset._model.tension !== 0) {
 				me.updateBezierControlPoints();
 			}
 		},
 
-		update: function update(reset) {
+		update: function(reset) {
 			var me = this;
 			var meta = me.getMeta();
 			var line = meta.dataset;
 			var points = meta.data || [];
 			var options = me.chart.options;
 			var lineElementOptions = options.elements.line;
-			var yScale = me.getScaleForId(meta.yAxisID);
-			var xScale = me.getScaleForId(meta.xAxisID);
-			var scaleBase, i, ilen, dataset, custom;
-
-			if (yScale.min < 0 && yScale.max < 0) {
-				scaleBase = yScale.getPixelForValue(yScale.max);
-			} else if (yScale.min > 0 && yScale.max > 0) {
-				scaleBase = yScale.getPixelForValue(yScale.min);
-			} else {
-				scaleBase = yScale.getPixelForValue(0);
-			}
+			var scale = me.getScaleForId(meta.yAxisID);
+			var i, ilen, custom;
+			var dataset = me.getDataset();
+			var showLine = lineEnabled(dataset, options);
 
 			// Update Line
-			if (options.showLines) {
-				dataset = me.getDataset();
+			if (showLine) {
 				custom = line.custom || {};
 
 				// Compatibility: If the properties are defined with only the old name, use those values
@@ -95,13 +69,17 @@ module.exports = function(Chart) {
 				}
 
 				// Utility
-				line._scale = yScale;
+				line._scale = scale;
 				line._datasetIndex = me.index;
 				// Data
 				line._children = points;
 				// Model
 				line._model = {
 					// Appearance
+					// The default behavior of lines is to break at null values, according
+					// to https://github.com/chartjs/Chart.js/issues/2435#issuecomment-216718158
+					// This option gives linse the ability to span gaps
+					spanGaps: dataset.spanGaps ? dataset.spanGaps : options.spanGaps,
 					tension: custom.tension ? custom.tension : helpers.getValueOrDefault(dataset.lineTension, lineElementOptions.tension),
 					backgroundColor: custom.backgroundColor ? custom.backgroundColor : (dataset.backgroundColor || lineElementOptions.backgroundColor),
 					borderWidth: custom.borderWidth ? custom.borderWidth : (dataset.borderWidth || lineElementOptions.borderWidth),
@@ -112,9 +90,9 @@ module.exports = function(Chart) {
 					borderJoinStyle: custom.borderJoinStyle ? custom.borderJoinStyle : (dataset.borderJoinStyle || lineElementOptions.borderJoinStyle),
 					fill: custom.fill ? custom.fill : (dataset.fill !== undefined ? dataset.fill : lineElementOptions.fill),
 					// Scale
-					scaleTop: yScale.top,
-					scaleBottom: yScale.bottom,
-					scaleZero: scaleBase
+					scaleTop: scale.top,
+					scaleBottom: scale.bottom,
+					scaleZero: scale.getBasePixel()
 				};
 
 				line.pivot();
@@ -125,8 +103,13 @@ module.exports = function(Chart) {
 				me.updateElement(points[i], i, reset);
 			}
 
-			if (options.showLines && lineElementOptions.tension !== 0) {
+			if (showLine && line._model.tension !== 0) {
 				me.updateBezierControlPoints();
+			}
+
+			// Now pivot the point for animation
+			for (i=0, ilen=points.length; i<ilen; ++i) {
+				points[i].pivot();
 			}
 		},
 
@@ -188,15 +171,7 @@ module.exports = function(Chart) {
 			var yScale = me.getScaleForId(meta.yAxisID);
 			var xScale = me.getScaleForId(meta.xAxisID);
 			var pointOptions = me.chart.options.elements.point;
-			var scaleBase, x, y;
-
-			if (yScale.min < 0 && yScale.max < 0) {
-				scaleBase = yScale.getPixelForValue(yScale.max);
-			} else if (yScale.min > 0 && yScale.max > 0) {
-				scaleBase = yScale.getPixelForValue(yScale.min);
-			} else {
-				scaleBase = yScale.getPixelForValue(0);
-			}
+			var x, y;
 
 			// Compatibility: If the properties are defined with only the old name, use those values
 			if ((dataset.radius !== undefined) && (dataset.pointRadius === undefined)) {
@@ -207,10 +182,9 @@ module.exports = function(Chart) {
 			}
 
 			x = xScale.getPixelForValue(value, index, datasetIndex, me.chart.isCombo);
-			y = reset ? scaleBase : me.calculatePointY(value, index, datasetIndex, me.chart.isCombo);
+			y = reset ? yScale.getBasePixel() : me.calculatePointY(value, index, datasetIndex);
 
 			// Utility
-			point._chart = me.chart.chart;
 			point._xScale = xScale;
 			point._yScale = yScale;
 			point._datasetIndex = datasetIndex;
@@ -233,11 +207,10 @@ module.exports = function(Chart) {
 			};
 		},
 
-		calculatePointY: function(value, index, datasetIndex, isCombo) {
+		calculatePointY: function(value, index, datasetIndex) {
 			var me = this;
 			var chart = me.chart;
 			var meta = me.getMeta();
-			var xScale = me.getScaleForId(meta.xAxisID);
 			var yScale = me.getScaleForId(meta.yAxisID);
 			var sumPos = 0;
 			var sumNeg = 0;
@@ -248,18 +221,20 @@ module.exports = function(Chart) {
 					ds = chart.data.datasets[i];
 					dsMeta = chart.getDatasetMeta(i);
 					if (dsMeta.type === 'line' && chart.isDatasetVisible(i)) {
-						if (ds.data[index] < 0) {
-							sumNeg += ds.data[index] || 0;
+						var stackedRightValue = yScale.getRightValue(ds.data[index]);
+						if (stackedRightValue < 0) {
+							sumNeg += stackedRightValue || 0;
 						} else {
-							sumPos += ds.data[index] || 0;
+							sumPos += stackedRightValue || 0;
 						}
 					}
 				}
 
-				if (value < 0) {
-					return yScale.getPixelForValue(sumNeg + value);
+				var rightValue = yScale.getRightValue(value);
+				if (rightValue < 0) {
+					return yScale.getPixelForValue(sumNeg + rightValue);
 				} else {
-					return yScale.getPixelForValue(sumPos + value);
+					return yScale.getPixelForValue(sumPos + rightValue);
 				}
 			}
 
@@ -268,7 +243,6 @@ module.exports = function(Chart) {
 
 		updateBezierControlPoints: function() {
 			var meta = this.getMeta();
-			var area = this.chart.chartArea;
 			var points = meta.data || [];
 			var i, ilen, point, model, controlPoints;
 
@@ -282,19 +256,16 @@ module.exports = function(Chart) {
 					meta.dataset._model.tension
 				);
 
-				// Prevent the bezier going outside of the bounds of the graph
-				model.controlPointPreviousX = Math.max(Math.min(controlPoints.previous.x, area.right), area.left);
-				model.controlPointPreviousY = Math.max(Math.min(controlPoints.previous.y, area.bottom), area.top);
-				model.controlPointNextX = Math.max(Math.min(controlPoints.next.x, area.right), area.left);
-				model.controlPointNextY = Math.max(Math.min(controlPoints.next.y, area.bottom), area.top);
-
-				// Now pivot the point for animation
-				point.pivot();
+				model.controlPointPreviousX = controlPoints.previous.x;
+				model.controlPointPreviousY = controlPoints.previous.y;
+				model.controlPointNextX = controlPoints.next.x;
+				model.controlPointNextY = controlPoints.next.y;
 			}
 		},
 
 		draw: function(ease) {
-			var meta = this.getMeta();
+			var me = this;
+			var meta = me.getMeta();
 			var points = meta.data || [];
 			var easingDecimal = ease || 1;
 			var i, ilen;
@@ -305,7 +276,7 @@ module.exports = function(Chart) {
 			}
 
 			// Transition and Draw the line
-			if (this.chart.options.showLines) {
+			if (lineEnabled(me.getDataset(), me.chart.options)) {
 				meta.dataset.transition(easingDecimal).draw();
 			}
 

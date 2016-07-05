@@ -4,7 +4,6 @@ module.exports = function(Chart) {
 
 	var helpers = Chart.helpers;
 
-
 	Chart.defaults.radar = {
 		scale: {
 			type: "radialLinear"
@@ -17,77 +16,41 @@ module.exports = function(Chart) {
 	};
 
 	Chart.controllers.radar = Chart.DatasetController.extend({
-		linkScales: function() {
-			// No need. Single scale only
-		},
 
-		addElements: function() {
-			var meta = this.getMeta();
+		datasetElementType: Chart.elements.Line,
 
-			meta.dataset = meta.dataset || new Chart.elements.Line({
-				_chart: this.chart.chart,
-				_datasetIndex: this.index,
-				_points: meta.data,
-				_loop: true
-			});
+		dataElementType: Chart.elements.Point,
 
-			helpers.each(this.getDataset().data, function(value, index) {
-				meta.data[index] = meta.data[index] || new Chart.elements.Point({
-					_chart: this.chart.chart,
-					_datasetIndex: this.index,
-					_index: index,
-					_model: {
-						x: 0, //xScale.getPixelForValue(null, index, true),
-						y: 0 //this.chartArea.bottom,
-					}
-				});
-			}, this);
-		},
+		linkScales: helpers.noop,
+
 		addElementAndReset: function(index) {
-			var point = new Chart.elements.Point({
-				_chart: this.chart.chart,
-				_datasetIndex: this.index,
-				_index: index
-			});
-
-			// Add to the points array and reset it
-			this.getMeta().data.splice(index, 0, point);
-			this.updateElement(point, index, true);
+			Chart.DatasetController.prototype.addElementAndReset.call(this, index);
 
 			// Make sure bezier control points are updated
 			this.updateBezierControlPoints();
 		},
 
-		update: function update(reset) {
-			var meta = this.getMeta();
+		update: function(reset) {
+			var me = this;
+			var meta = me.getMeta();
 			var line = meta.dataset;
 			var points = meta.data;
 			var custom = line.custom || {};
-			var dataset = this.getDataset();
-			var lineElementOptions = this.chart.options.elements.line;
-
-			var scale = this.chart.scale;
-			var scaleBase;
-
-			if (scale.min < 0 && scale.max < 0) {
-				scaleBase = scale.getPointPositionForValue(0, scale.max);
-			} else if (scale.min > 0 && scale.max > 0) {
-				scaleBase = scale.getPointPositionForValue(0, scale.min);
-			} else {
-				scaleBase = scale.getPointPositionForValue(0, 0);
-			}
+			var dataset = me.getDataset();
+			var lineElementOptions = me.chart.options.elements.line;
+			var scale = me.chart.scale;
 
 			// Compatibility: If the properties are defined with only the old name, use those values
-			if ((dataset.tension !== undefined) && (dataset.lineTension === undefined))
-			{
+			if ((dataset.tension !== undefined) && (dataset.lineTension === undefined)) {
 				dataset.lineTension = dataset.tension;
 			}
 
 			helpers.extend(meta.dataset, {
 				// Utility
-				_datasetIndex: this.index,
+				_datasetIndex: me.index,
 				// Data
 				_children: points,
+				_loop: true,
 				// Model
 				_model: {
 					// Appearance
@@ -104,7 +67,7 @@ module.exports = function(Chart) {
 					// Scale
 					scaleTop: scale.top,
 					scaleBottom: scale.bottom,
-					scaleZero: scaleBase
+					scaleZero: scale.getBasePosition()
 				}
 			});
 
@@ -112,23 +75,24 @@ module.exports = function(Chart) {
 
 			// Update Points
 			helpers.each(points, function(point, index) {
-				this.updateElement(point, index, reset);
-			}, this);
+				me.updateElement(point, index, reset);
+			}, me);
 
 
 			// Update bezier control points
-			this.updateBezierControlPoints();
+			me.updateBezierControlPoints();
 		},
 		updateElement: function(point, index, reset) {
+			var me = this;
 			var custom = point.custom || {};
-			var dataset = this.getDataset();
-			var scale = this.chart.scale;
-			var pointElementOptions = this.chart.options.elements.point;
+			var dataset = me.getDataset();
+			var scale = me.chart.scale;
+			var pointElementOptions = me.chart.options.elements.point;
 			var pointPosition = scale.getPointPositionForValue(index, dataset.data[index]);
 
 			helpers.extend(point, {
 				// Utility
-				_datasetIndex: this.index,
+				_datasetIndex: me.index,
 				_index: index,
 				_scale: scale,
 
@@ -138,7 +102,7 @@ module.exports = function(Chart) {
 					y: reset ? scale.yCenter : pointPosition.y,
 
 					// Appearance
-					tension: custom.tension ? custom.tension : helpers.getValueOrDefault(dataset.tension, this.chart.options.elements.line.tension),
+					tension: custom.tension ? custom.tension : helpers.getValueOrDefault(dataset.tension, me.chart.options.elements.line.tension),
 					radius: custom.radius ? custom.radius : helpers.getValueAtIndexOrDefault(dataset.pointRadius, index, pointElementOptions.radius),
 					backgroundColor: custom.backgroundColor ? custom.backgroundColor : helpers.getValueAtIndexOrDefault(dataset.pointBackgroundColor, index, pointElementOptions.backgroundColor),
 					borderColor: custom.borderColor ? custom.borderColor : helpers.getValueAtIndexOrDefault(dataset.pointBorderColor, index, pointElementOptions.borderColor),
@@ -174,7 +138,7 @@ module.exports = function(Chart) {
 
 				// Now pivot the point for animation
 				point.pivot();
-			}, this);
+			});
 		},
 
 		draw: function(ease) {
@@ -182,7 +146,7 @@ module.exports = function(Chart) {
 			var easingDecimal = ease || 1;
 
 			// Transition Point Locations
-			helpers.each(meta.data, function(point, index) {
+			helpers.each(meta.data, function(point) {
 				point.transition(easingDecimal);
 			});
 

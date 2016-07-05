@@ -24,7 +24,7 @@ module.exports = function(Chart) {
 
 		tooltips: {
 			callbacks: {
-				title: function(tooltipItems, data) {
+				title: function() {
 					// Title doesn't make sense for scatter since we format the data as a point
 					return '';
 				},
@@ -37,93 +37,54 @@ module.exports = function(Chart) {
 		}
 	};
 
-
 	Chart.controllers.bubble = Chart.DatasetController.extend({
-		addElements: function() {
-			var meta = this.getMeta();
-			helpers.each(this.getDataset().data, function(value, index) {
-				meta.data[index] = meta.data[index] || new Chart.elements.Point({
-					_chart: this.chart.chart,
-					_datasetIndex: this.index,
-					_index: index
-				});
-			}, this);
-		},
-		addElementAndReset: function(index) {
-			var point = new Chart.elements.Point({
-				_chart: this.chart.chart,
-				_datasetIndex: this.index,
-				_index: index
-			});
 
-			// Add to the points array and reset it
-			this.getMeta().data.splice(index, 0, point);
-			this.updateElement(point, index, true);
-		},
+		dataElementType: Chart.elements.Point,
 
-		update: function update(reset) {
-			var meta = this.getMeta();
+		update: function(reset) {
+			var me = this;
+			var meta = me.getMeta();
 			var points = meta.data;
-			var yScale = this.getScaleForId(meta.yAxisID);
-			var xScale = this.getScaleForId(meta.xAxisID);
-			var scaleBase;
-
-			if (yScale.min < 0 && yScale.max < 0) {
-				scaleBase = yScale.getPixelForValue(yScale.max);
-			} else if (yScale.min > 0 && yScale.max > 0) {
-				scaleBase = yScale.getPixelForValue(yScale.min);
-			} else {
-				scaleBase = yScale.getPixelForValue(0);
-			}
 
 			// Update Points
 			helpers.each(points, function(point, index) {
-				this.updateElement(point, index, reset);
-			}, this);
-
+				me.updateElement(point, index, reset);
+			});
 		},
 
 		updateElement: function(point, index, reset) {
-			var meta = this.getMeta();
-			var yScale = this.getScaleForId(meta.yAxisID);
-			var xScale = this.getScaleForId(meta.xAxisID);
-			var scaleBase;
+			var me = this;
+			var meta = me.getMeta();
+			var xScale = me.getScaleForId(meta.xAxisID);
+			var yScale = me.getScaleForId(meta.yAxisID);
 
 			var custom = point.custom || {};
-			var dataset = this.getDataset();
+			var dataset = me.getDataset();
 			var data = dataset.data[index];
-			var pointElementOptions = this.chart.options.elements.point;
-
-			if (yScale.min < 0 && yScale.max < 0) {
-				scaleBase = yScale.getPixelForValue(yScale.max);
-			} else if (yScale.min > 0 && yScale.max > 0) {
-				scaleBase = yScale.getPixelForValue(yScale.min);
-			} else {
-				scaleBase = yScale.getPixelForValue(0);
-			}
+			var pointElementOptions = me.chart.options.elements.point;
+			var dsIndex = me.index;
 
 			helpers.extend(point, {
 				// Utility
-				_chart: this.chart.chart,
 				_xScale: xScale,
 				_yScale: yScale,
-				_datasetIndex: this.index,
+				_datasetIndex: dsIndex,
 				_index: index,
 
 				// Desired view properties
 				_model: {
-					x: reset ? xScale.getPixelForDecimal(0.5) : xScale.getPixelForValue(data, index, this.index, this.chart.isCombo),
-					y: reset ? scaleBase : yScale.getPixelForValue(data, index, this.index),
+					x: reset ? xScale.getPixelForDecimal(0.5) : xScale.getPixelForValue(data, index, dsIndex, me.chart.isCombo),
+					y: reset ? yScale.getBasePixel() : yScale.getPixelForValue(data, index, dsIndex),
 					// Appearance
-					radius: reset ? 0 : custom.radius ? custom.radius : this.getRadius(data),
-					backgroundColor: custom.backgroundColor ? custom.backgroundColor : helpers.getValueAtIndexOrDefault(dataset.backgroundColor, index, pointElementOptions.backgroundColor),
-					borderColor: custom.borderColor ? custom.borderColor : helpers.getValueAtIndexOrDefault(dataset.borderColor, index, pointElementOptions.borderColor),
-					borderWidth: custom.borderWidth ? custom.borderWidth : helpers.getValueAtIndexOrDefault(dataset.borderWidth, index, pointElementOptions.borderWidth),
+					radius: reset ? 0 : custom.radius ? custom.radius : me.getRadius(data),
 
 					// Tooltip
 					hitRadius: custom.hitRadius ? custom.hitRadius : helpers.getValueAtIndexOrDefault(dataset.hitRadius, index, pointElementOptions.hitRadius)
 				}
 			});
+
+			// Trick to reset the styles of the point
+			Chart.DatasetController.prototype.removeHoverStyle.call(me, point, pointElementOptions);
 
 			var model = point._model;
 			model.skip = custom.skip ? custom.skip : (isNaN(model.x) || isNaN(model.y));
@@ -135,41 +96,27 @@ module.exports = function(Chart) {
 			return value.r || this.chart.options.elements.point.radius;
 		},
 
-		draw: function(ease) {
-			var easingDecimal = ease || 1;
-
-			// Transition and Draw the Points
-			helpers.each(this.getMeta().data, function(point, index) {
-				point.transition(easingDecimal);
-				point.draw();
-			});
-
-		},
-
 		setHoverStyle: function(point) {
-			// Point
-			var dataset = this.chart.data.datasets[point._datasetIndex];
+			var me = this;
+			Chart.DatasetController.prototype.setHoverStyle.call(me, point);
+
+			// Radius
+			var dataset = me.chart.data.datasets[point._datasetIndex];
 			var index = point._index;
 			var custom = point.custom || {};
 			var model = point._model;
-
-			model.radius = custom.hoverRadius ? custom.hoverRadius : (helpers.getValueAtIndexOrDefault(dataset.hoverRadius, index, this.chart.options.elements.point.hoverRadius)) + this.getRadius(this.getDataset().data[point._index]);
-			model.backgroundColor = custom.hoverBackgroundColor ? custom.hoverBackgroundColor : helpers.getValueAtIndexOrDefault(dataset.hoverBackgroundColor, index, helpers.getHoverColor(model.backgroundColor));
-			model.borderColor = custom.hoverBorderColor ? custom.hoverBorderColor : helpers.getValueAtIndexOrDefault(dataset.hoverBorderColor, index, helpers.getHoverColor(model.borderColor));
-			model.borderWidth = custom.hoverBorderWidth ? custom.hoverBorderWidth : helpers.getValueAtIndexOrDefault(dataset.hoverBorderWidth, index, model.borderWidth);
+			model.radius = custom.hoverRadius ? custom.hoverRadius : (helpers.getValueAtIndexOrDefault(dataset.hoverRadius, index, me.chart.options.elements.point.hoverRadius)) + me.getRadius(dataset.data[index]);
 		},
 
 		removeHoverStyle: function(point) {
-			var dataset = this.chart.data.datasets[point._datasetIndex];
-			var index = point._index;
+			var me = this;
+			Chart.DatasetController.prototype.removeHoverStyle.call(me, point, me.chart.options.elements.point);
+
+			var dataVal = me.chart.data.datasets[point._datasetIndex].data[point._index];
 			var custom = point.custom || {};
 			var model = point._model;
-			var pointElementOptions = this.chart.options.elements.point;
 
-			model.radius = custom.radius ? custom.radius : this.getRadius(dataset.data[point._index]);
-			model.backgroundColor = custom.backgroundColor ? custom.backgroundColor : helpers.getValueAtIndexOrDefault(dataset.backgroundColor, index, pointElementOptions.backgroundColor);
-			model.borderColor = custom.borderColor ? custom.borderColor : helpers.getValueAtIndexOrDefault(dataset.borderColor, index, pointElementOptions.borderColor);
-			model.borderWidth = custom.borderWidth ? custom.borderWidth : helpers.getValueAtIndexOrDefault(dataset.borderWidth, index, pointElementOptions.borderWidth);
+			model.radius = custom.radius ? custom.radius : me.getRadius(dataVal);
 		}
 	});
 };
